@@ -1,50 +1,312 @@
-# template-for-proposals
+# Proposal: `code` Property for ECMAScript Error Objects
 
-A repository template for ECMAScript proposals.
+## Status
 
-## Before creating a proposal
+Stage 0 — Pre-proposal
 
-Please ensure the following:
-  1. You have read the [process document](https://tc39.github.io/process-document/)
-  1. You have reviewed the [existing proposals](https://github.com/tc39/proposals/)
-  1. You are aware that your proposal requires being a member of TC39, or locating a TC39 delegate to “champion” your proposal
+## Champions
 
-## Create your proposal repo
+TBD
 
-Follow these steps:
-  1. Click the green [“use this template”](https://github.com/tc39/template-for-proposals/generate) button in the repo header. (Note: Do not fork this repo in GitHub's web interface, as that will later prevent transfer into the TC39 organization)
-  1. Update ecmarkup and the biblio to the latest version: `npm install --save-dev ecmarkup@latest && npm install --save-dev --save-exact @tc39/ecma262-biblio@latest`.
-  1. Go to your repo settings page:
-      1. Under “General”, under “Features”, ensure “Issues” is checked, and disable “Wiki”, and “Projects” (unless you intend to use Projects)
-      1. Under “Pull Requests”, check “Always suggest updating pull request branches” and “automatically delete head branches”
-      1. Under the “Pages” section on the left sidebar, and set the source to “deploy from a branch”, select “gh-pages” in the branch dropdown, and then ensure that “Enforce HTTPS” is checked.
-      1. Under the “Actions” section on the left sidebar, under “General”, select “Read and write permissions” under “Workflow permissions” and click “Save”
-  1. [“How to write a good explainer”][explainer] explains how to make a good first impression.
+## The Use Case
 
-      > Each TC39 proposal should have a `README.md` file which explains the purpose
-      > of the proposal and its shape at a high level.
-      >
-      > ...
-      >
-      > The rest of this page can be used as a template ...
+A standardized `code` property would enable:
 
-      Your explainer can point readers to the `index.html` generated from `spec.emu`
-      via markdown like
+1. **Precise programmatic error handling.** Application code can branch on specific
+   error conditions without depending on message strings:
 
-      ```markdown
-      You can browse the [ecmarkup output](https://ACCOUNT.github.io/PROJECT/)
-      or browse the [source](https://github.com/ACCOUNT/PROJECT/blob/HEAD/spec.emu).
-      ```
+   ```js
+   try {
+     const data = JSON.parse(input);
+   } catch (e) {
+     if (e.code === 'ERR_INVALID_JSON') {
+       // Handle malformed input specifically
+     }
+   }
+   ```
 
-      where *ACCOUNT* and *PROJECT* are the first two path elements in your project's Github URL.
-      For example, for github.com/**tc39**/**template-for-proposals**, *ACCOUNT* is “tc39”
-      and *PROJECT* is “template-for-proposals”.
+2. **Stable error contracts across versions.** An error code is a machine-readable
+   identifier that can be documented, versioned, and relied upon — unlike messages,
+   which are implementation-defined prose.
 
+3. **Cross-realm error identification.** Unlike `instanceof`, a string `.code`
+   property survives structured cloning, serialization, and cross-realm transfer.
 
-## Maintain your proposal repo
+4. **Improved error reporting and telemetry.** Aggregating errors by `.code` in
+   monitoring systems (Sentry, Datadog, etc.) is more reliable and useful than
+   aggregating by message, which varies across engines and versions.
 
-  1. Make your changes to `spec.emu` (ecmarkup uses HTML syntax, but is not HTML, so I strongly suggest not naming it “.html”)
-  1. Any commit that makes meaningful changes to the spec, should run `npm run build` to verify that the build will succeed and the output looks as expected.
-  1. Whenever you update `ecmarkup`, run `npm run build` to verify that the build will succeed and the output looks as expected.
+5. **Error translation and i18n.** With a stable code, error messages can be
+   localized or mapped to user-facing text without losing machine-readability.
 
-  [explainer]: https://github.com/tc39/how-we-work/blob/HEAD/explainer.md
+6. **Ecosystem alignment.** Providing a standard property that the ecosystem already
+   uses would reduce fragmentation and give library authors a blessed pattern to
+   follow.
+
+7. **Better developer experience.** Documentation and tooling can reference error
+   codes. A developer can search for `ERR_INVALID_ARG_TYPE` and find definitive
+   documentation, whereas searching for a message string is unreliable.
+
+## Prior Art Survey
+
+The JavaScript ecosystem has overwhelmingly and independently adopted `error.code`
+as the solution. This section surveys the landscape.
+
+### JavaScript Runtimes
+
+#### Node.js
+
+The most mature implementation. Node.js has used string `.code` properties on errors
+since v8.0 (2017), with hundreds of documented codes.
+
+- **Type:** `string` (instance property)
+- **Convention:** `ERR_*` prefix for Node.js errors (e.g., `ERR_INVALID_ARG_TYPE`,
+  `ERR_BUFFER_OUT_OF_BOUNDS`, `ERR_HTTP2_INVALID_HEADER_VALUE`). POSIX codes for
+  system errors (`ENOENT`, `EACCES`, `ECONNREFUSED`).
+- **Scope:** 200+ documented `ERR_*` codes organized by subsystem, plus POSIX and
+  OpenSSL codes.
+- **Architecture:** Internal `NodeErrorAbstraction` classes extend native types
+  (`TypeError`, `RangeError`, etc.) and set `.code` in the constructor.
+- **Design choice:** Node.js deliberately chose **strings over numbers** so that
+  error handling code is self-documenting without looking up magic numbers.
+- **Stability commitment:** Error codes are part of the stable API. Removing or
+  changing the semantics of a code is a breaking change.
+
+```js
+// Node.js error with .code
+const fs = require('fs');
+try {
+  fs.readFileSync('/nonexistent');
+} catch (e) {
+  e.code;    // 'ENOENT'
+  e.message; // "ENOENT: no such file or directory, open '/nonexistent'"
+}
+```
+
+#### Deno
+
+Deno mirrors Node.js `.code` exactly in its `node:*` compatibility layer:
+
+- **Node compat:** Uses `ERR_*` string codes, identical to Node.js.
+- **Native APIs:** Uses class hierarchy instead (`Deno.errors.NotFound`,
+  `Deno.errors.PermissionDenied`), relying on `instanceof` + `.name`.
+
+The fact that Deno adopted Node.js error codes wholesale for its compat layer
+demonstrates that the pattern is essential for interoperability.
+
+#### Bun
+
+Bun also mirrors Node.js `.code` for all `node:*` module errors:
+
+- Same `ERR_*` convention, same POSIX codes for system errors.
+- Bun's own native APIs throw standard `Error`/`TypeError` without custom codes.
+
+#### Cloudflare Workers
+
+Cloudflare Workers also mirror Node.js error codes for `node:*` module errors
+
+- Same `ERR_*` convention for compatibility.
+- Native APIs throw standard `Error` without custom codes.
+
+### Web Platform
+
+#### DOMException
+
+DOMException has both a legacy numeric `.code` and a modern string `.name`:
+
+- **`.code`** (`number`): **Deprecated.** Legacy constants like
+  `NOT_FOUND_ERR = 8`, `NOT_SUPPORTED_ERR = 9`. Returns `0` for all newer error
+  types added after ~2012.
+- **`.name`** (`string`): The modern identifier. PascalCase:
+  `"NotFoundError"`, `"AbortError"`, `"DataCloneError"`.
+
+**The web platform's explicit deprecation of numeric `.code` in favor of string
+`.name` is a clear signal: string-based error identification is the right path.**
+
+#### MediaError
+
+- **Type:** `number`
+- **Codes:** `MEDIA_ERR_ABORTED = 1`, `MEDIA_ERR_NETWORK = 2`,
+  `MEDIA_ERR_DECODE = 3`, `MEDIA_ERR_SRC_NOT_SUPPORTED = 4`
+
+#### GeolocationPositionError
+
+- **Type:** `number`
+- **Codes:** `PERMISSION_DENIED = 1`, `POSITION_UNAVAILABLE = 2`, `TIMEOUT = 3`
+
+#### RTCError
+
+- Inherits DOMException (`.code` + `.name`) but adds a **string**
+  `.errorDetail` property (`"sdp-syntax-error"`, `"dtls-failure"`, etc.) for
+  domain-specific identification.
+
+#### Trend
+
+Older Web APIs used numeric codes. Newer ones use strings. The platform has moved
+toward string-based identification.
+
+### Popular Libraries
+
+The following major libraries independently adopted `error.code`:
+
+| Library              | `.code` type | Convention                                   |
+| -------------------- | ------------ | -------------------------------------------- |
+| **axios**            | `string`     | `ERR_NETWORK`, `ERR_CANCELED`, `ETIMEDOUT`   |
+| **Firebase**         | `string`     | `"auth/user-not-found"`, `"storage/not-found"` |
+| **Stripe**           | `string`     | `"card_declined"`, `"rate_limit"`            |
+| **Prisma**           | `string`     | `"P2002"`, `"P2025"`, `"P1001"`             |
+| **pg** (Postgres)    | `string`     | SQLSTATE codes: `"23505"`, `"42P01"`         |
+| **mysql2**           | `string`     | `"ER_DUP_ENTRY"`, `"ER_ACCESS_DENIED_ERROR"` |
+| **MongoDB/mongoose** | `number`     | MongoDB server codes: `11000`                |
+| **@grpc/grpc-js**    | `number`     | gRPC status codes: `5` (NOT_FOUND)           |
+| **AWS SDK v3**       | `string`     | `"AccessDenied"`, `"NoSuchBucket"`           |
+| **Zod**              | `string`     | `"invalid_type"`, `"too_small"`              |
+
+**String codes dominate.** Numeric codes appear only where an upstream protocol
+defines them (gRPC, MongoDB).
+
+### TypeScript Compiler
+
+TypeScript diagnostics use numeric `.code` (e.g., `2322` for type mismatch, `2339`
+for missing property). These are stable, documented, and indexed — but optimized
+for tooling consumption, not catch-block branching.
+
+### Other Languages
+
+| Language  | Mechanism                                        | Type         |
+| --------- | ------------------------------------------------ | ------------ |
+| **Python**    | Exception class hierarchy + `OSError.errno`          | class + `int`  |
+| **Rust**      | `std::io::ErrorKind` enum + `.raw_os_error()`        | enum + `i32`   |
+| **Go**        | Sentinel values (`os.ErrNotExist`) + `errors.Is()`   | value identity |
+| **Java**      | Exception hierarchy + `SQLException.getSQLState()`   | class + `String` |
+| **C#/.NET**   | Exception hierarchy + `Exception.HResult`            | class + `int`  |
+
+Most languages use type hierarchies as the primary mechanism, with optional
+string/numeric codes for interop with external systems (OS, databases, protocols).
+JavaScript lacks a practical type hierarchy for this purpose (limited built-in
+subtypes, cross-realm issues with `instanceof`), making a property-based approach
+more appropriate.
+
+## Proposed Design
+
+### API
+
+Extend the `Error` constructor options bag (introduced in ES2022 for `cause`) to
+accept a `code` property:
+
+```js
+new Error("something went wrong", { code: "ERR_SOMETHING" })
+new TypeError("expected string", { code: "ERR_INVALID_ARG_TYPE", cause: original })
+```
+
+The `.code` property would be:
+
+- **Defined on instances**, not on `Error.prototype`
+- **Type:** any value (not restricted to strings, consistent with `cause`)
+- **Default:** property is not present when not provided (`'code' in err` is
+  `false`), consistent with `cause`
+- **Enumerable:** `false` (consistent with `cause` and `message`)
+- **Writable:** `true` (consistent with other Error properties)
+- **Configurable:** `true`
+
+### Why not restrict the type to `string`?
+
+While strings are the dominant convention in the ecosystem (Node.js, axios, Firebase,
+Stripe, etc.), the spec should not constrain the type. Several major libraries use
+numeric codes (gRPC, MongoDB, TypeScript diagnostics), and `cause` already
+established the precedent of accepting any value without type restriction.
+
+The ecosystem strongly favors strings for the reasons outlined in the prior art
+survey — self-documenting, no lookup tables, no collision risk — but this is best
+left as a convention rather than a language-level constraint.
+
+### Why absent by default, not mandatory
+
+1. Backward compatibility: existing `new Error("msg")` calls should work unchanged.
+2. Not all errors have meaningful codes (e.g., ad-hoc `throw new Error("bug")`).
+3. Follows the `cause` precedent, which is also absent when not provided.
+
+### Why not just use `error.name`?
+
+`error.name` already exists and defaults to the constructor name (`"TypeError"`,
+`"RangeError"`, etc.). However:
+
+- `.name` is **coarse-grained** — all TypeErrors share the same `.name`.
+- `.code` provides **fine-grained** identification within an error type.
+- They are complementary: `.name` says *what kind* of error; `.code` says *which
+  specific* error condition.
+- Overwriting `.name` to encode specific conditions conflates two concerns and
+  breaks `instanceof`-based expectations.
+
+DOMException is a cautionary example of what happens when `.name` is repurposed to
+carry specific error identity. Every DOMException instance has its `.name` set to a
+specific error string like `"NotFoundError"` or `"AbortError"` rather than
+`"DOMException"`. This means:
+
+- **`instanceof` and `.name` disagree.** `err instanceof DOMException` is `true`,
+  but `err.name` is `"AbortError"`, not `"DOMException"`. This breaks the
+  fundamental expectation that `.name` reflects the constructor/type.
+- **`error.name` becomes load-bearing for dispatch.** Code must switch on `.name`
+  to distinguish DOMException subtypes, making `.name` a de facto error code while
+  still nominally being the "type name." This is exactly what `.code` should be for.
+- **It forecloses subclassing.** Because `.name` already carries the specific error
+  identity, there is no room for a DOMException subclass to have its own `.name`
+  without losing the error identity, and no room for `.name` to reflect the actual
+  class hierarchy.
+- **Stack traces and logging are misleading.** A logged `DOMException` shows its
+  `.name` as `"AbortError"`, which looks like a separate error class that doesn't
+  exist. Developers search for an `AbortError` constructor and find nothing (or
+  find that `AbortError` is just a `DOMException` with a specific `.name`).
+
+Had `.code` existed as a standard property, DOMException could have used
+`{ code: "AbortError" }` while keeping `.name` as `"DOMException"`, preserving the
+natural relationship between `.name`, `instanceof`, and the class hierarchy.
+
+## Relationship to Existing Proposals
+
+- **`Error.cause`** (ES2022): Established the options bag pattern on the `Error`
+  constructor. This proposal extends that same bag with `code`.
+- **Error Stacks** (Stage 1): Focuses on standardizing `error.stack`. Orthogonal
+  but complementary — stacks could include codes.
+- **`Error.isError`** (Stage 2): Cross-realm error identification. Complementary —
+  `.code` provides fine-grained identification within a confirmed error.
+
+## FAQ
+
+### Doesn't this encourage stringly-typed programming?
+
+No more than `error.message` and `error.name` already do. The key difference is
+that `.code` is explicitly intended as a **machine-readable identifier** with
+stability guarantees, whereas `.message` is human-readable prose. A `.code` is
+semantically equivalent to a discriminant in a tagged union — it just uses a
+string (typically) instead of a type tag.
+
+### Won't every library invent its own codes, leading to chaos?
+
+They already do — that's the current situation. Standardizing the *property*
+doesn't require standardizing the *values*. It provides a blessed location for
+codes (instead of ad-hoc properties like `.errno`, `.errorCode`, `.errCode`, etc.)
+and enables tooling to be built around a single convention.
+
+### Why not use Symbol-based codes instead of strings?
+
+Symbols would prevent collisions but sacrifice the key advantages of string codes:
+serialization, logging, telemetry aggregation, human readability, and cross-realm
+transfer. The Node.js ecosystem has demonstrated that string codes with prefix
+conventions (`ERR_*`) are practical and collision-resistant.
+
+But since the code value can be any type, libraries and applications can use
+symbols if they prefer - the proposal does not preclude that.
+
+### Can't you solve this with error subclasses?
+
+In theory, yes — a class hierarchy can encode any error taxonomy. In practice:
+
+- `instanceof` breaks across realms.
+- The built-in error hierarchy is too shallow (only ~7 types).
+- Creating deep class hierarchies for every error condition is ergonomically heavy.
+- Error subclasses cannot be pattern-matched in `catch` (no `catch (e if ...)` in
+  standard JS).
+- The ecosystem has already voted with its feet: `.code` on instances.
+- Structured cloning and cross-realm transfer of errors is common (e.g., `postMessage`),
+  and classes don't survive that.
