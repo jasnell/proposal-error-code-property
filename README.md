@@ -88,18 +88,53 @@ try {
 Deno mirrors Node.js `.code` exactly in its `node:*` compatibility layer:
 
 - **Node compat:** Uses `ERR_*` string codes, identical to Node.js.
-- **Native APIs:** Uses class hierarchy instead (`Deno.errors.NotFound`,
-  `Deno.errors.PermissionDenied`), relying on `instanceof` + `.name`.
+- **Native APIs:** Uses a class hierarchy instead (`Deno.errors.NotFound`,
+  `Deno.errors.PermissionDenied`), relying on `instanceof` checks. POSIX errno
+  strings (e.g., `ENOENT`, `ECONNREFUSED`) are attached as `.code` on I/O errors
+  via the underlying OS error, but this is not documented as a public API.
 
 The fact that Deno adopted Node.js error codes wholesale for its compat layer
-demonstrates that the pattern is essential for interoperability.
+demonstrates that the pattern is essential for interoperability. Deno's native
+choice of `instanceof`-based error classes highlights the limitation of that
+approach — it doesn't survive structured cloning or cross-realm transfer, and
+requires importing specific error constructors.
+
+```js
+// Running in Deno
+let e = new Deno.errors.PermissionDenied()
+console.log(e instanceof Deno.errors.PermissionDenied) // true
+console.log(e.name) // "PermissionDenied"
+
+// The details of the error do not survive structured cloning
+let clone = structuredClone(e)
+console.log(clone instanceof Deno.errors.PermissionDenied) // false
+console.log(clone.name) // "Error"
+
+// Does not survive postMessage either
+const { port1, port2 } = new MessageChannel();
+port1.postMessage(e);
+port2.onmessage = (event) => {
+  const received = event.data;
+  console.log(received instanceof Deno.errors.PermissionDenied) // false
+  console.log(received.name) // "Error"
+};
+```
+
+Deno also does not implement `DOMException` as structured cloneable, so it loses
+all type information, including the modified `.name` property when cloned.
 
 #### Bun
 
-Bun also mirrors Node.js `.code` for all `node:*` module errors:
+Bun mirrors Node.js `.code` for all `node:*` module errors, and has extended
+the same convention to its own native APIs:
 
-- Same `ERR_*` convention, same POSIX codes for system errors.
-- Bun's own native APIs throw standard `Error`/`TypeError` without custom codes.
+- Same `ERR_*` convention and POSIX codes for system errors.
+- Bun-native APIs use original `ERR_*` codes: e.g., `ERR_POSTGRES_*` for the
+  built-in Postgres client, `ERR_REDIS_*` for Redis, and `ERR_S3_*` for S3.
+
+Bun's decision to adopt `ERR_*` codes for its own non-Node APIs — rather than
+inventing a separate error identification scheme — is strong evidence that
+`.code` is the natural extension point for JavaScript errors.
 
 #### Cloudflare Workers
 
@@ -151,25 +186,19 @@ The following major libraries independently adopted `error.code`:
 
 | Library              | `.code` type | Convention                                   |
 | -------------------- | ------------ | -------------------------------------------- |
-| **axios**            | `string`     | `ERR_NETWORK`, `ERR_CANCELED`, `ETIMEDOUT`   |
-| **Firebase**         | `string`     | `"auth/user-not-found"`, `"storage/not-found"` |
-| **Stripe**           | `string`     | `"card_declined"`, `"rate_limit"`            |
-| **Prisma**           | `string`     | `"P2002"`, `"P2025"`, `"P1001"`             |
-| **pg** (Postgres)    | `string`     | SQLSTATE codes: `"23505"`, `"42P01"`         |
-| **mysql2**           | `string`     | `"ER_DUP_ENTRY"`, `"ER_ACCESS_DENIED_ERROR"` |
-| **MongoDB/mongoose** | `number`     | MongoDB server codes: `11000`                |
-| **@grpc/grpc-js**    | `number`     | gRPC status codes: `5` (NOT_FOUND)           |
-| **AWS SDK v3**       | `string`     | `"AccessDenied"`, `"NoSuchBucket"`           |
-| **Zod**              | `string`     | `"invalid_type"`, `"too_small"`              |
+| [**axios**][axios-err]            | `string`     | `ERR_NETWORK`, `ERR_CANCELED`, `ETIMEDOUT`   |
+| [**Firebase**][firebase-err]         | `string`     | `"auth/user-not-found"`, `"storage/not-found"` |
+| [**Stripe**][stripe-err]           | `string`     | `"card_declined"`, `"rate_limit"`            |
+| [**Prisma**][prisma-err]           | `string`     | `"P2002"`, `"P2025"`, `"P1001"`             |
+| [**pg** (Postgres)][pg-err]    | `string`     | SQLSTATE codes: `"23505"`, `"42P01"`         |
+| [**mysql2**][mysql2-err]           | `string`     | `"ER_DUP_ENTRY"`, `"ER_ACCESS_DENIED_ERROR"` |
+| [**MongoDB/mongoose**][mongo-err] | `number`     | MongoDB server codes: `11000`                |
+| [**@grpc/grpc-js**][grpc-err]    | `number`     | gRPC status codes: `5` (NOT_FOUND)           |
+| [**AWS SDK v3**][aws-err]       | `string`     | `"AccessDenied"`, `"NoSuchBucket"`           |
+| [**Zod**][zod-err]              | `string`     | `"invalid_type"`, `"too_small"`              |
 
 **String codes dominate.** Numeric codes appear only where an upstream protocol
 defines them (gRPC, MongoDB).
-
-### TypeScript Compiler
-
-TypeScript diagnostics use numeric `.code` (e.g., `2322` for type mismatch, `2339`
-for missing property). These are stable, documented, and indexed — but optimized
-for tooling consumption, not catch-block branching.
 
 ### Other Languages
 
@@ -268,21 +297,20 @@ left as a convention rather than a language-level constraint.
 - **`Error.cause`** (ES2022): Established the options bag pattern on the `Error`
   constructor. This proposal extends that same bag with `code`.
 - **Error Stacks** (Stage 1): Focuses on standardizing `error.stack`. Orthogonal
-  but complementary — stacks could include codes.
+  but complementary — stacks could include codes. Related proposals will make use
+  of the options bag for other metadata.
 - **`Error.isError`** (Stage 2): Cross-realm error identification. Complementary —
   `.code` provides fine-grained identification within a confirmed error.
-- **Explicit Resource Management** (Stage 3): Introduces `SuppressedError`, which
-  already accepts an options bag with `cause`. This proposal extends it with `code`.
 
 ## FAQ
 
 ### Doesn't this encourage stringly-typed programming?
 
-No more than `error.message` and `error.name` already do. The key difference is
-that `.code` is explicitly intended as a **machine-readable identifier** with
-stability guarantees, whereas `.message` is human-readable prose. A `.code` is
-semantically equivalent to a discriminant in a tagged union — it just uses a
-string (typically) instead of a type tag.
+No more than `error.message` and `error.name` already do in practice. The key
+difference is that `.code` is explicitly intended as a **machine-readable
+identifier**, ideally with stability guarantees, whereas `.message` is
+human-readable prose. A `.code` is semantically equivalent to a discriminant in
+a tagged union — it just uses a string (typically) instead of a type tag.
 
 ### Won't every library invent its own codes, leading to chaos?
 
@@ -291,7 +319,14 @@ doesn't require standardizing the *values*. It provides a blessed location for
 codes (instead of ad-hoc properties like `.errno`, `.errorCode`, `.errCode`, etc.)
 and enables tooling to be built around a single convention.
 
-### Why not use Symbol-based codes instead of strings?
+### Are we defining a new error taxonomy with this proposal?
+
+No. The proposal does not prescribe any specific codes or taxonomies. It simply
+provides a standard property for libraries and applications to use if they choose
+to. The ecosystem can evolve organically, and popular codes will emerge as de
+facto standards (e.g., `ERR_INVALID_ARG_TYPE` in Node.js).
+
+### Why not encourage use of Symbol-based codes instead of strings?
 
 Symbols would prevent collisions but sacrifice the key advantages of string codes:
 serialization, logging, telemetry aggregation, human readability, and cross-realm
@@ -313,3 +348,19 @@ In theory, yes — a class hierarchy can encode any error taxonomy. In practice:
 - The ecosystem has already voted with its feet: `.code` on instances.
 - Structured cloning and cross-realm transfer of errors is common (e.g., `postMessage`),
   and classes don't survive that.
+
+We see these limitations demonstrated in Deno's namespace of `Deno.errors.*`
+classes, which cannot be reliably identified across cloning boundaries, and
+variable runtime support of `structuredClone`, etc.
+
+<!-- Reference links for the Popular Libraries table -->
+[axios-err]: https://axios-http.com/docs/handling_errors
+[firebase-err]: https://firebase.google.com/docs/reference/js/auth#autherrorcodes
+[stripe-err]: https://docs.stripe.com/error-codes
+[prisma-err]: https://www.prisma.io/docs/orm/reference/error-reference
+[pg-err]: https://node-postgres.com/apis/client
+[mysql2-err]: https://sidorares.github.io/node-mysql2/docs
+[mongo-err]: https://www.mongodb.com/docs/manual/reference/error-codes/
+[grpc-err]: https://grpc.github.io/grpc/node/grpc.html
+[aws-err]: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/Package/-smithy-smithy-client/
+[zod-err]: https://zod.dev/error-handling

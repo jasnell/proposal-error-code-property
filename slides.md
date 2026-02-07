@@ -81,14 +81,14 @@ try {
 
 Mirrors the `cause` property exactly
 
-| Property       | Value                                         |
-| -------------- | --------------------------------------------- |
-| **Defined on** | Instances, not `Error.prototype`              |
-| **Type**       | Any value (consistent with `cause`)           |
-| **Default**    | Absent when not provided (`'code' in err` is `false`) |
-| **Enumerable** | `false`                                       |
-| **Writable**   | `true`                                        |
-| **Configurable** | `true`                                     |
+|                  |                                                       |
+| ---------------- | ----------------------------------------------------- |
+| **Defined on**   | Instances, not `Error.prototype`                      |
+| **Type**         | Any value (consistent with `cause`)                   |
+| **Default**      | Absent when not provided (`'code' in err` is `false`) |
+| **Enumerable**   | `false`                                               |
+| **Writable**     | `true`                                                |
+| **Configurable** | `true`                                                |
 
 ---
 
