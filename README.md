@@ -15,15 +15,15 @@ A standardized `code` property would enable:
 1. **Precise programmatic error handling.** Application code can branch on specific
    error conditions without depending on message strings:
 
-   ```js
-   try {
-     const data = JSON.parse(input);
-   } catch (e) {
-     if (e.code === 'ERR_INVALID_JSON') {
-       // Handle malformed input specifically
-     }
-   }
-   ```
+    ```js
+    try {
+      await db.connect();
+    } catch (e) {
+      if (e.code === 'ERR_CONNECTION_REFUSED') {
+        // Retry with backoff
+      }
+    }
+    ```
 
 2. **Stable error contracts across versions.** An error code is a machine-readable
    identifier that can be documented, versioned, and relied upon — unlike messages,
@@ -187,46 +187,7 @@ JavaScript lacks a practical type hierarchy for this purpose (limited built-in
 subtypes, cross-realm issues with `instanceof`), making a property-based approach
 more appropriate.
 
-## Proposed Design
-
-### API
-
-Extend the `Error` constructor options bag (introduced in ES2022 for `cause`) to
-accept a `code` property:
-
-```js
-new Error("something went wrong", { code: "ERR_SOMETHING" })
-new TypeError("expected string", { code: "ERR_INVALID_ARG_TYPE", cause: original })
-```
-
-The `.code` property would be:
-
-- **Defined on instances**, not on `Error.prototype`
-- **Type:** any value (not restricted to strings, consistent with `cause`)
-- **Default:** property is not present when not provided (`'code' in err` is
-  `false`), consistent with `cause`
-- **Enumerable:** `false` (consistent with `cause` and `message`)
-- **Writable:** `true` (consistent with other Error properties)
-- **Configurable:** `true`
-
-### Why not restrict the type to `string`?
-
-While strings are the dominant convention in the ecosystem (Node.js, axios, Firebase,
-Stripe, etc.), the spec should not constrain the type. Several major libraries use
-numeric codes (gRPC, MongoDB, TypeScript diagnostics), and `cause` already
-established the precedent of accepting any value without type restriction.
-
-The ecosystem strongly favors strings for the reasons outlined in the prior art
-survey — self-documenting, no lookup tables, no collision risk — but this is best
-left as a convention rather than a language-level constraint.
-
-### Why absent by default, not mandatory
-
-1. Backward compatibility: existing `new Error("msg")` calls should work unchanged.
-2. Not all errors have meaningful codes (e.g., ad-hoc `throw new Error("bug")`).
-3. Follows the `cause` precedent, which is also absent when not provided.
-
-### Why not just use `error.name`?
+## Why Not Just Use `error.name`?
 
 `error.name` already exists and defaults to the constructor name (`"TypeError"`,
 `"RangeError"`, etc.). However:
@@ -262,6 +223,46 @@ Had `.code` existed as a standard property, DOMException could have used
 `{ code: "AbortError" }` while keeping `.name` as `"DOMException"`, preserving the
 natural relationship between `.name`, `instanceof`, and the class hierarchy.
 
+## Proposed Design
+
+### API
+
+Extend the `Error` constructor options bag (introduced in ES2022 for `cause`) to
+accept a `code` property. This applies to `Error`, all `NativeError` types
+(`TypeError`, `RangeError`, etc.), `AggregateError`, and `SuppressedError`:
+
+```js
+new Error("something went wrong", { code: "ERR_SOMETHING" })
+new TypeError("expected string", { code: "ERR_INVALID_ARG_TYPE", cause: original })
+```
+
+The `.code` property would be:
+
+- **Defined on instances**, not on `Error.prototype`
+- **Type:** any value (not restricted to strings, consistent with `cause`)
+- **Default:** property is not present when not provided (`'code' in err` is
+  `false`), consistent with `cause`
+- **Enumerable:** `false` (consistent with `cause` and `message`)
+- **Writable:** `true` (consistent with other Error properties)
+- **Configurable:** `true`
+
+### Why not restrict the type to `string`?
+
+While strings are the dominant convention in the ecosystem (Node.js, axios, Firebase,
+Stripe, etc.), the spec should not constrain the type. Several major libraries use
+numeric codes (gRPC, MongoDB, TypeScript diagnostics), and `cause` already
+established the precedent of accepting any value without type restriction.
+
+The ecosystem strongly favors strings for the reasons outlined in the prior art
+survey — self-documenting, no lookup tables, no collision risk — but this is best
+left as a convention rather than a language-level constraint.
+
+### Why absent by default, not mandatory
+
+1. Backward compatibility: existing `new Error("msg")` calls should work unchanged.
+2. Not all errors have meaningful codes (e.g., ad-hoc `throw new Error("bug")`).
+3. Follows the `cause` precedent, which is also absent when not provided.
+
 ## Relationship to Existing Proposals
 
 - **`Error.cause`** (ES2022): Established the options bag pattern on the `Error`
@@ -270,6 +271,8 @@ natural relationship between `.name`, `instanceof`, and the class hierarchy.
   but complementary — stacks could include codes.
 - **`Error.isError`** (Stage 2): Cross-realm error identification. Complementary —
   `.code` provides fine-grained identification within a confirmed error.
+- **Explicit Resource Management** (Stage 3): Introduces `SuppressedError`, which
+  already accepts an options bag with `cause`. This proposal extends it with `code`.
 
 ## FAQ
 
