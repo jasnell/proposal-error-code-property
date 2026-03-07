@@ -202,6 +202,27 @@ Had `.code` existed, DOMException could have used `{ code: "AbortError" }` while
 
 ---
 
+# DOMException Interaction
+
+DOMException has `Error` in its prototype chain and a legacy numeric `.code` — is there a conflict?
+
+<v-click>
+
+- `code` is only installed when passed via the constructor options bag — it is never set by default
+- DOMException's constructor does not accept an options bag, so `InstallErrorCode` is never invoked — no shadowing occurs
+- This proposal does **not** modify `DOMException` — not web-breaking
+- A single web platform type's legacy use of a property name should not constrain language-level improvements
+
+</v-click>
+
+<v-click>
+
+The `.code` property name overlap already exists today — Node.js, Deno, Bun, and hundreds of libraries all set `.code` on Error instances alongside DOMException in the same runtimes. The ecosystem has already made this choice.
+
+</v-click>
+
+---
+
 # Spec Changes
 
 A single new abstract operation, called from all Error constructors
