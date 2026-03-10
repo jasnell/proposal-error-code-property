@@ -11,7 +11,7 @@ class: text-center
 
 A TC39 Proposal
 
-Stage 0
+Stage 1?
 
 James M Snell
 
@@ -277,7 +277,7 @@ class: text-center
 
 `code` Property for Error Objects
 
-Stage 0 -- Pre-proposal
+Asking for Stage 1
 
 <br>
 
