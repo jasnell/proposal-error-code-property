@@ -41,7 +41,7 @@ try {
 
 `.name` tells you *what kind* of error (one of ~7 built-in types), but not *which specific* condition. All TypeErrors look the same.
 
-Even DOMException, which repurposes `.name` for specific identity (`"AbortError"`, `"NotFoundError"`), demonstrates the problem -- `instanceof` and `.name` disagree, stack traces are misleading, and subclassing is foreclosed.
+Even DOMException, which repurposes `.name` for specific identity (`"AbortError"`, `"NotFoundError"`), demonstrates the problem -- `instanceof` and `.name` disagree, stack traces are misleading.
 
 </v-click>
 
@@ -186,7 +186,7 @@ The web already learned this lesson
 - `err instanceof DOMException` is `true`, but `err.name` is `"AbortError"` -- not `"DOMException"`
 - `.name` became a de facto error code while still nominally being the "type name"
 - Stack traces show `"AbortError"` -- looks like a class that doesn't exist
-- Forecloses subclassing: no room for a subclass `.name` without losing error identity
+- Difficult to subclass `.name` without losing error identity
 
 <v-click>
 
