@@ -7,7 +7,7 @@ info: |
 class: text-center
 ---
 
-# `Error.prototype.code` Proposal
+# Error Code Property Proposal
 
 A TC39 Proposal
 
@@ -277,8 +277,14 @@ class: text-center
 
 `code` Property for Error Objects
 
-Asking for Stage 1
+<v-clicks>
+Asking for Stage 1?
+
+How about Stage 2?
+
+Or maybe even... Stage 2.7?
+</v-clicks>
 
 <br>
 
-[Proposal](https://github.com/jasnell/proposal-error-code-property) | [Spec Text](https://jasnell.github.io/proposal-error-code-property/)
+[Proposal](https://github.com/jasnell/proposal-error-code-property) | [Spec Text](https://github.com/jasnell/proposal-error-code-property/blob/main/spec.emu)
