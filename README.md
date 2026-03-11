@@ -2,11 +2,15 @@
 
 ## Status
 
-Stage 0 — Pre-proposal
+Stage 1
 
 ## Champions
 
-TBD
+James M Snell
+
+## Reviewers
+
+Jordan Harband
 
 ## The Use Case
 
